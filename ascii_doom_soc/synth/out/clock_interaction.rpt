@@ -1,0 +1,24 @@
+Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+---------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2025.2 (lin64) Build 6299465 Fri Nov 14 12:34:56 MST 2025
+| Date         : Sat Jun 13 13:10:13 2026
+| Host         : ian running 64-bit Ubuntu 24.04.3 LTS
+| Command      : report_clock_interaction -file synth/out/clock_interaction.rpt
+| Design       : fpga_top
+| Device       : 7a100t-csg324
+| Speed File   : -1  PRODUCTION 1.23 2018-06-13
+| Design State : Synthesized
+---------------------------------------------------------------------------------------------------------------------------------------------
+
+Clock Interaction Report
+
+Clock Interaction Table
+-----------------------
+
+                            WNS                            TNS Failing  TNS Total    WNS Path         Clock-Pair           Inter-Clock  
+From Clock    To Clock      Clock Edges  WNS(ns)  TNS(ns)    Endpoints    Endpoints  Requirement(ns)  Classification       Constraints  
+------------  ------------  -----------  -------  -------  -----------  -----------  ---------------  -------------------  -----------  
+pix_clk_raw   pix_clk_raw   rise - rise    35.98     0.00            0           85            40.00  Clean                Timed        
+sys_clk_raw   sys_clk_raw   rise - rise     1.14     0.00            0         5595            15.38  Clean                Timed        
+
+

@@ -1,0 +1,14 @@
+*.bit
+*.log
+*.jou
+__pycache__
+.Xil/
+gds/output/*
+obj_dir/
+*.vcd
+*.fst
+*.pyc
+*.elf
+*.hex
+*.map
+sim_build/

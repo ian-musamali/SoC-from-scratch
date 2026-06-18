@@ -1,0 +1,32 @@
+#-----------------------------------------------------------
+# Vivado v2025.2 (64-bit)
+# SW Build 6299465 on Fri Nov 14 12:34:56 MST 2025
+# IP Build 6300035 on Fri Nov 14 10:48:45 MST 2025
+# SharedData Build 6298862 on Thu Nov 13 04:50:51 MST 2025
+# Start of session at: Sat Jun 13 13:00:33 2026
+# Process ID         : 287080
+# Current directory  : /home/ian/SoC-from-scratch
+# Command line       : vivado
+# Log file           : /home/ian/SoC-from-scratch/vivado.log
+# Journal file       : /home/ian/SoC-from-scratch/vivado.jou
+# Running On         : ian
+# Platform           : Ubuntu
+# Operating System   : Ubuntu 24.04.3 LTS
+# Processor Detail   : AMD Ryzen 7 7735U with Radeon Graphics
+# CPU Frequency      : 2082.556 MHz
+# CPU Physical cores : 8
+# CPU Logical cores  : 16
+# Host memory        : 32340 MB
+# Swap memory        : 8589 MB
+# Total Virtual      : 40930 MB
+# Available Virtual  : 37183 MB
+#-----------------------------------------------------------
+start_gui
+cd /home/ian/SoC-from-scratch/ascii_doom_soc
+source synth/synth_nexys_a7.tcl
+cd /home/ian/SoC-from-scratch/ascii_doom_soc
+source synth/synth_nexys_a7.tcl
+open_run synth_1
+opt_design
+place_design
+route_design
