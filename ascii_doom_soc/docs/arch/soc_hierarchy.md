@@ -6,7 +6,7 @@
 soc_top
 ├── u_clk_mmcm          [Xilinx MMCM primitive]  100 MHz → 25.175 MHz pixel clock
 │
-├── u_picorv32_axi      [rtl/core/picorv32_axi_wrap.sv]  RISC-V CPU, AXI4-Lite master
+├── u_picorv32_axi      [rtl/core/picorv32_axi.sv]  RISC-V CPU, AXI4-Lite master
 │
 ├── u_axi_dma           [rtl/dma/axi_dma.sv]             DMA engine, AXI4-Lite master
 │
@@ -20,7 +20,7 @@ soc_top
 │
 ├── u_bram              [Xilinx BRAM36 primitive]         256 KB unified instr+data
 │
-├── u_uart              [rtl/core/uart_tx.sv]             TX-only debug UART
+├── u_uart              [rtl/core/uart_lite.sv]           AXI4-Lite stub — tx tied idle, not a real UART yet
 │
 ├── u_char_framebuffer  [rtl/vga/char_framebuffer.sv]     80×45 byte BRAM
 │   ├── AXI4-Lite write port  ← fabric SLAVE 2

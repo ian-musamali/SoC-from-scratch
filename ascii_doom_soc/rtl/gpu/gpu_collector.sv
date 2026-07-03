@@ -18,12 +18,14 @@ module gpu_collector #(
 ) (
     input  logic        clk,
     input  logic        rst_n,
-    // Per-core result inputs
-    input  logic [NUM_CORES-1:0] core_done,
-    input  logic [6:0]           core_col         [0:NUM_CORES-1],
-    input  logic [7:0]           core_char        [0:NUM_CORES-1],
-    input  logic [5:0]           core_wall_top    [0:NUM_CORES-1],
-    input  logic [5:0]           core_wall_height [0:NUM_CORES-1],
+    // Per-core result inputs. Packed (not unpacked-array) ports so this
+    // synthesizes under Yosys (OpenLane GDS flow) — see gpu_dispatcher.sv for
+    // why. Bit i*W +: W is core i's W-bit value.
+    input  logic [NUM_CORES-1:0]        core_done,
+    input  logic [NUM_CORES*7-1:0]      core_col_flat,
+    input  logic [NUM_CORES*8-1:0]      core_char_flat,
+    input  logic [NUM_CORES*6-1:0]      core_wall_top_flat,
+    input  logic [NUM_CORES*6-1:0]      core_wall_height_flat,
     // High when no core result is waiting to be picked up — gates gpu_dispatcher
     output logic        queue_empty,
     // AXI4-Lite write master (to fabric)
@@ -117,10 +119,10 @@ module gpu_collector #(
             for (int i = 0; i < NUM_CORES; i++) begin
                 if (core_done[i] && !pend_valid[i]) begin
                     pend_valid[i]   <= 1'b1;
-                    pend_col[i]     <= core_col[i];
-                    pend_char[i]    <= core_char[i];
-                    pend_wtop[i]    <= core_wall_top[i];
-                    pend_wheight[i] <= core_wall_height[i];
+                    pend_col[i]     <= core_col_flat[i*7 +: 7];
+                    pend_char[i]    <= core_char_flat[i*8 +: 8];
+                    pend_wtop[i]    <= core_wall_top_flat[i*6 +: 6];
+                    pend_wheight[i] <= core_wall_height_flat[i*6 +: 6];
                 end
             end
 

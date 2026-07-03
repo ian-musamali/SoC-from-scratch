@@ -218,3 +218,59 @@ candidates are the new `row_char` combinational mux in `gpu_collector.sv` or inc
 from the per-core `wall_top`/`wall_height` buses, not `fpdiv` itself (multi-cycle, registered
 in/out). If it regresses further, dropping `sys_clk` a few hundred kHz is the cheap fix; the
 harder fix is pipelining the offending combinational path.
+
+---
+
+## `dda_core.sv` direction pipeline split (2026-07-03, follow-up)
+
+The "likely candidates" guess above (`gpu_collector` row_char mux / `wall_top`/`wall_height`
+fanout) was **wrong**. Reading `synth/out/timing_summary_impl.rpt`'s actual worst path (not
+just its WNS number) found the real critical path entirely inside `dda_core.sv`, in the
+per-column ray-direction setup that predates the wall-height work:
+
+```
+Source:      gen_cores[2].u_core/player_idx_reg__6/C     (INIT state, registered)
+Destination: gen_cores[2].u_core/ddx_reg[30]/D            (PREP state, registered)
+Data path:   15.230ns, 17 logic levels (CARRY4×10, DSP48E1×1, LUT2/4/5/6)
+```
+
+`player_idx` (registered in `INIT`) feeds, all combinationally within the *same* cycle that
+lands on the `PREP`-state `ddx`/`ddy` registers: a `sin_table` lookup for `player_cos`/
+`player_sin` → a signed 64-bit multiply (`rdx_mul_a = player_cos * fisheye_table[col_r]`,
+mapped to a DSP48E1) → a subtract (`rdx_comb`) → `PREP`'s own conditional two's-complement
+negate + magnitude compare + table-select mux that produces `ddx`. None of that chain is new
+this session — it's been there since the original DDA implementation — but it was apparently
+always the tightest path in the design; the wall-height rendering work just ate enough of the
+remaining slack (+0.420ns → +0.020ns) to make it visible as the binding constraint.
+
+**Fix:** added a new FSM state `DIR_WAIT` between `INIT` and `PREP`. `DIR_WAIT` does nothing but
+register `rdx_comb`/`rdy_comb` into new `rdx_lat`/`rdy_lat` signals; `PREP` then reads
+`rdx_lat`/`rdy_lat` instead of the raw combinational `rdx_comb`/`rdy_comb` for the abs/compare/
+mux that produces `ddx`, `ddy`, `step_x_neg`, `step_y_neg`. This splits the sin-lookup+multiply
++subtract off from the abs+compare+mux, putting a register boundary between them instead of
+letting both settle in one clock period. Cost: one extra cycle per column in the one-time
+per-column setup (not the ~90-cycle MARCH loop), invisible at the frame level.
+
+**Verification:**
+- Verilator lint (`--lint-only -Wall`): zero warnings referencing `dda_core.sv`/`DIR_WAIT`/
+  `rdx_lat`/`rdy_lat` — no latch inference, no combinational loop, enum still fits its 3-bit
+  encoding (8 states).
+- `sim/tb_soc` regression: 80/80 wall characters + 80/80 wall heights still PASS; frame cycle
+  count went from ~16170 to 16190 (+20, consistent with the extra `DIR_WAIT` cycle × however
+  many of the 80 columns actually transit it across 4 cores) — purely a latency change, no
+  functional difference.
+- Full `impl_nexys_a7.tcl` re-run: **WNS improved +0.020ns → +0.180ns** (9x), 0 failing
+  endpoints out of 9828, 0 errors/critical warnings, bitstream regenerated
+  (`synth/out/ascii_doom_soc.bit`). Utilization essentially unchanged (LUTs 6770→6745, FFs
+  3323→3491, BRAM/DSP48 identical) — the FF increase is a bit more than the ~64 bits of new
+  state (2×32-bit `rdx_lat`/`rdy_lat`), likely additional retiming around the new state.
+
+**New critical path** (still worth knowing before the next GPU change): now in the per-core
+`fpdiv` (`u_height_div`) added for wall-height rendering — `ddx_reg[2]/C` →
+`u_height_div/result_reg[23]/CE`, 14.873ns, 11 logic levels through `fish_mul`'s DSP48E1 and
+the divider's control logic. This matches what `docs/HANDOFF.md`'s Known Issues section already
+predicted (`fpdiv`/`fpmul` pipelining as the next timing lever) — not yet addressed, margin is
+healthy again (+0.180ns) so no immediate action needed.
+
+**Not yet done:** bitstream has not been reflashed to the physical Nexys A7 board — this fix,
+like everything from movement-input onward, is simulation + place-and-route verified only.

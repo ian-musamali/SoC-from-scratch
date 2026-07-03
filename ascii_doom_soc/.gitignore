@@ -4,6 +4,7 @@
 __pycache__
 .Xil/
 gds/output/*
+gds/config/runs/
 obj_dir/
 *.vcd
 *.fst

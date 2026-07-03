@@ -169,9 +169,15 @@ module soc_top #(
     // Map BRAMs — per-core replicated read-only maps
     // (CPU initialises via BRAM S0 aliased top 4KB; simplified here as inferred BRAM)
     // =========================================================================
-    logic [11:0] map_addr [0:NUM_GPU_CORES-1];
-    logic [7:0]  map_data [0:NUM_GPU_CORES-1];
-    logic        map_req  [0:NUM_GPU_CORES-1];
+    logic [11:0]              map_addr [0:NUM_GPU_CORES-1];
+    logic [7:0]                map_data [0:NUM_GPU_CORES-1];
+    logic [NUM_GPU_CORES-1:0] map_req; // 1 bit/core: packed vector, not an unpacked array
+
+    // gpu_top's map_read_addr/data ports are packed flat buses (Yosys can't
+    // synthesize unpacked-array ports — see gpu_dispatcher.sv), while the
+    // per-core BRAMs below want a plain per-core array. Shim between the two.
+    logic [NUM_GPU_CORES*12-1:0] map_addr_flat;
+    logic [NUM_GPU_CORES*8-1:0]  map_data_flat;
 
     // Per-core map BRAMs — separate 1D arrays so Vivado infers one BRAM18 per core.
     // (2D arrays infer as "3D-RAM" and may dissolve into registers.)
@@ -179,6 +185,10 @@ module soc_top #(
     genvar mc;
     generate
         for (mc = 0; mc < NUM_GPU_CORES; mc++) begin : gen_map
+            // Unpack/pack this core's slice of gpu_top's flat map ports
+            assign map_addr[mc] = map_addr_flat[mc*12 +: 12];
+            assign map_data_flat[mc*8 +: 8] = map_data[mc];
+
             (* ram_style = "block" *)
             logic [7:0] map_bram [0:MAP_SIZE*MAP_SIZE-1];
 
@@ -488,9 +498,9 @@ module soc_top #(
         .m_wvalid (gcoll_wvalid),  .m_wready (gcoll_wready),
         .m_bresp  (gcoll_bresp),   .m_bvalid (gcoll_bvalid),  .m_bready(gcoll_bready),
         // Per-core map ports
-        .map_read_addr(map_addr),
-        .map_read_data(map_data),
-        .map_read_req (map_req)
+        .map_read_addr_flat(map_addr_flat),
+        .map_read_data_flat(map_data_flat),
+        .map_read_req      (map_req)
     );
 
     // =========================================================================

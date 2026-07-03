@@ -14,7 +14,7 @@
 // Per-column tables give exact cos/sin/ddx/ddy for the FOV offset angle.
 // For non-zero player_angle, angle addition combines player direction with FOV tables.
 //
-// Latency: INIT(1) + PREP(1) + DDA_steps(≤90) + DONE(1) ≈ ≤93 cycles typical
+// Latency: INIT(1) + DIR_WAIT(1) + PREP(1) + DDA_steps(≤90) + DONE(1) ≈ ≤94 cycles typical
 /* verilator lint_off UNUSEDPARAM */
 module dda_core #(
     parameter int TOTAL_COLS = 80,
@@ -48,15 +48,18 @@ module dda_core #(
     // -----------------------------------------------------------------------
     // Distance-to-ASCII bracket (matches Python reference thresholds exactly)
     // -----------------------------------------------------------------------
+    // Yosys 0.46 (OpenLane GDS flow) does not support `return` inside functions;
+    // assign the function name instead (identical behavior for this mutually
+    // exclusive if/else-if chain, and supported by Verilator/Vivado too).
     function automatic logic [7:0] dist_to_ascii(input logic [31:0] d);
-        if      (d < 32'h0001_0000) return 8'h23; // '#'  < 1.0
-        else if (d < 32'h0001_8000) return 8'h25; // '%'  < 1.5
-        else if (d < 32'h0002_8000) return 8'h2A; // '*'  < 2.5
-        else if (d < 32'h0004_0000) return 8'h2B; // '+'  < 4.0
-        else if (d < 32'h0006_0000) return 8'h3D; // '='  < 6.0
-        else if (d < 32'h0009_0000) return 8'h2D; // '-'  < 9.0
-        else if (d < 32'h000E_0000) return 8'h3A; // ':'  < 14.0
-        else                        return 8'h2E; // '.'
+        if      (d < 32'h0001_0000) dist_to_ascii = 8'h23; // '#'  < 1.0
+        else if (d < 32'h0001_8000) dist_to_ascii = 8'h25; // '%'  < 1.5
+        else if (d < 32'h0002_8000) dist_to_ascii = 8'h2A; // '*'  < 2.5
+        else if (d < 32'h0004_0000) dist_to_ascii = 8'h2B; // '+'  < 4.0
+        else if (d < 32'h0006_0000) dist_to_ascii = 8'h3D; // '='  < 6.0
+        else if (d < 32'h0009_0000) dist_to_ascii = 8'h2D; // '-'  < 9.0
+        else if (d < 32'h000E_0000) dist_to_ascii = 8'h3A; // ':'  < 14.0
+        else                        dist_to_ascii = 8'h2E; // '.'
     endfunction
 
     // -----------------------------------------------------------------------
@@ -78,52 +81,26 @@ module dda_core #(
     //   = exact delta_dist_y for player_angle=0 (Q_BIG for col=40 where sin=0)
     logic [31:0]        ddy_table    [0:79];
 
-    /* verilator lint_off INITIALDLY */
-    initial begin
-        automatic real v;
-        automatic real fov_ang;
-        automatic real cos_fov;
-        automatic real sin_fov;
-        for (int k = 0; k < 256; k++) begin
-            v = $sin(6.283185307 * k / 256.0);
-            sin_table[k] = $rtoi(v * 65536.0);
-        end
-        for (int c = 0; c < 80; c++) begin
-            fov_ang = $atan2(1.0*(c-40), 60.0);
-            cos_fov = $cos(fov_ang);
-            sin_fov = $sin(fov_ang);
-            fov_table[c]     = $rtoi(fov_ang * 65536.0);
-            // fisheye_table: ceil(cos_fov * 65536) for all columns except col=25 (floor).
-            // col=25 uses floor to match Python float64 which computes 5.9999... < 6.0.
-            // Ceiling for other boundary columns (4, 30) ensures correct bracket.
-            if (c == 25)
-                fisheye_table[c] = $rtoi(cos_fov * 65536.0);
-            else begin
-                // ceil: $rtoi truncates toward zero; add 0.9999 to force ceiling for positive
-                v = cos_fov * 65536.0;
-                fisheye_table[c] = (v > 0.0) ? $rtoi(v + 0.9999999) : $rtoi(v);
-            end
-            fov_sin_table[c] = $rtoi(sin_fov * 65536.0);
-            // ddx = |1/cos_fov|, use floor (truncate)
-            if (cos_fov > -0.0001 && cos_fov < 0.0001)
-                ddx_table[c] = 32'h7FFF_FFFF;
-            else
-                ddx_table[c] = $rtoi((1.0 / (cos_fov < 0.0 ? -cos_fov : cos_fov)) * 65536.0);
-            // ddy = |1/sin_fov|, use round (+0.5) to match Python float64 rounding
-            if (sin_fov > -0.0001 && sin_fov < 0.0001)
-                ddy_table[c] = 32'h7FFF_FFFF;
-            else begin
-                v = (1.0 / (sin_fov < 0.0 ? -sin_fov : sin_fov)) * 65536.0;
-                ddy_table[c] = $rtoi(v + 0.5);
-            end
-        end
-    end
-    /* verilator lint_on INITIALDLY */
+    // These tables were originally computed here via $sin/$cos/$atan2/$rtoi in an
+    // initial block (real-valued math, elaboration-time only). Vivado tolerates that
+    // for BRAM initial values, but Yosys (used by the OpenLane GDS flow for gpu_top)
+    // does not implement real-math system functions for synthesis at all. Values are
+    // bit-identical to the original computation — captured once via a temporary
+    // $writememh dump from this exact RTL (see rtl/gpu/gen_dda_luts.sh to regenerate
+    // if TOTAL_COLS/the LUT math ever changes) — then frozen into checked-in hex
+    // files and loaded with $readmemh, the same idiom already used for
+    // fonts/font8x8.hex and software/firmware/map.hex elsewhere in this project.
+    initial $readmemh("rtl/gpu/luts/sin_table.hex", sin_table);
+    initial $readmemh("rtl/gpu/luts/fov_table.hex", fov_table);
+    initial $readmemh("rtl/gpu/luts/fisheye_table.hex", fisheye_table);
+    initial $readmemh("rtl/gpu/luts/fov_sin_table.hex", fov_sin_table);
+    initial $readmemh("rtl/gpu/luts/ddx_table.hex", ddx_table);
+    initial $readmemh("rtl/gpu/luts/ddy_table.hex", ddy_table);
 
     // -----------------------------------------------------------------------
     // State machine
     // -----------------------------------------------------------------------
-    typedef enum logic [2:0] {IDLE, INIT, PREP, MAP_WAIT, MARCH, HEIGHT_WAIT, DONE_ST} state_t;
+    typedef enum logic [2:0] {IDLE, INIT, DIR_WAIT, PREP, MAP_WAIT, MARCH, HEIGHT_WAIT, DONE_ST} state_t;
     state_t state;
 
     // Latched inputs
@@ -188,6 +165,14 @@ module dda_core #(
     logic signed [31:0] rdx_comb, rdy_comb;
     assign rdx_comb = $signed(rdx_mul_a[47:16]) - $signed(rdx_mul_b[47:16]);
     assign rdy_comb = $signed(rdy_mul_a[47:16]) + $signed(rdy_mul_b[47:16]);
+
+    // Registered copies of rdx_comb/rdy_comb, latched one cycle after player_idx
+    // settles (DIR_WAIT state below). Breaks the post-route critical path: without
+    // this, the sin_table lookup -> signed multiply -> subtract -> PREP's abs/compare/
+    // mux all landed on the ddx/ddy registers in a single cycle (17 logic levels,
+    // DSP48E1 + long carry chain, WNS down to +0.020ns post wall-height rendering).
+    // See docs/decisions/soc_top.md, "dda_core direction pipeline split".
+    logic signed [31:0] rdx_lat, rdy_lat;
 
     // -----------------------------------------------------------------------
     // Perpendicular wall distance — combinational, valid whenever MARCH detects
@@ -281,6 +266,7 @@ module dda_core #(
             px_r        <= '0; py_r <= '0; ang_r <= '0; col_r <= '0;
             ray_angle   <= '0; player_idx <= '0;
             rdx         <= '0; rdy <= '0;
+            rdx_lat     <= '0; rdy_lat <= '0;
             ddx         <= Q_BIG; ddy <= Q_BIG;
             sdx         <= '0; sdy <= '0;
             step_x_neg  <= 1'b0; step_y_neg <= 1'b0;
@@ -316,16 +302,28 @@ module dda_core #(
                 INIT: begin
                     // player_idx_comb is combinational from ang_r (just latched)
                     player_idx <= player_idx_comb;
-                    state      <= PREP;
+                    state      <= DIR_WAIT;
+                end
+
+                // --------------------------------------------------------
+                // DIR_WAIT: let player_cos/sin -> rdx_mul_a/b -> rdx_comb settle
+                // combinationally from the player_idx just latched in INIT, then
+                // register the result. Keeps that multiply+subtract off the same
+                // cycle as PREP's abs/compare/mux, which is what fed the ddx/ddy
+                // registers directly and produced the razor-thin post-route WNS.
+                DIR_WAIT: begin
+                    rdx_lat <= rdx_comb;
+                    rdy_lat <= rdy_comb;
+                    state   <= PREP;
                 end
 
                 // --------------------------------------------------------
                 // PREP: latch ray direction and delta_dists using per-column tables
-                // player_cos, player_sin are combinational from player_idx (just latched)
-                // rdx_comb, rdy_comb combine player direction with FOV tables exactly
+                // rdx_lat/rdy_lat (registered in DIR_WAIT) combine player direction
+                // with FOV tables exactly
                 PREP: begin
-                    rdx        <= rdx_comb;
-                    rdy        <= rdy_comb;
+                    rdx        <= rdx_lat;
+                    rdy        <= rdy_lat;
                     // ddx and ddy: for player_angle=0, use exact per-column tables
                     // For non-zero player_angle, also use exact tables scaled by
                     // the rotation. The per-column tables give the base delta_dists
@@ -333,12 +331,12 @@ module dda_core #(
                     // The exact ddx/ddy = ddx_table[col] * |cos(ray_angle)| / |cos_fov|
                     // which simplifies to 1/|ray_cos| -- we approximate with tables.
                     // For the testbench (angle=0): exact match guaranteed.
-                    ddx        <= (rdx_comb[31] ? (~rdx_comb + 32'd1) : rdx_comb) < 32'h0000_0100 ?
+                    ddx        <= (rdx_lat[31] ? (~rdx_lat + 32'd1) : rdx_lat) < 32'h0000_0100 ?
                                   Q_BIG : ddx_table[col_r];
-                    ddy        <= (rdy_comb[31] ? (~rdy_comb + 32'd1) : rdy_comb) < 32'h0000_0100 ?
+                    ddy        <= (rdy_lat[31] ? (~rdy_lat + 32'd1) : rdy_lat) < 32'h0000_0100 ?
                                   Q_BIG : ddy_table[col_r];
-                    step_x_neg <= rdx_comb[31]; // sign of ray x direction
-                    step_y_neg <= rdy_comb[31]; // sign of ray y direction
+                    step_x_neg <= rdx_lat[31]; // sign of ray x direction
+                    step_y_neg <= rdy_lat[31]; // sign of ray y direction
                     state      <= MAP_WAIT;
                 end
 

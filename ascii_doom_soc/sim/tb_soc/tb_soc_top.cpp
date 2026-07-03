@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 
 static Vsoc_top* dut;
 
@@ -223,6 +224,19 @@ int main(int argc, char** argv) {
     for (int r = 0; r < NUM_ROWS; r++)
         for (int c = 0; c < NUM_COLS; c++)
             grid[r][c] = (uint8_t)(dut->rootp->soc_top__DOT__u_cfb__DOT__mem[r * NUM_COLS + c] & 0xFF);
+
+    // Optional: dump the full rendered grid as hex bytes for offline rendering
+    // (see docs/images/gen_screenshot.py) — opt-in via env var, no effect on
+    // the regression itself.
+    if (const char* dump_path = std::getenv("DUMP_FRAME_GRID")) {
+        FILE* f = fopen(dump_path, "w");
+        for (int r = 0; r < NUM_ROWS; r++) {
+            for (int c = 0; c < NUM_COLS; c++)
+                fprintf(f, "%02x ", grid[r][c]);
+            fprintf(f, "\n");
+        }
+        fclose(f);
+    }
 
     // The wall-shading character choice (dist_to_ascii in dda_core.sv) is
     // completely unchanged by the wall-height feature — still bit-exact

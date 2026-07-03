@@ -16,12 +16,15 @@ module gpu_dispatcher #(
     input  logic [31:0] player_x,
     input  logic [31:0] player_y,
     input  logic [31:0] player_angle,
-    // Per-core dispatch signals (flattened arrays)
+    // Per-core dispatch signals. Packed (not unpacked-array) ports so this
+    // synthesizes under Yosys (OpenLane GDS flow) — "input/output/inout ports
+    // cannot have unpacked dimensions" is a hard Yosys restriction, verified
+    // directly against Yosys 0.46. Bit i*W +: W is core i's W-bit value.
     output logic [NUM_CORES-1:0]        core_start,
-    output logic [6:0]                  core_col   [0:NUM_CORES-1],
-    output logic [31:0]                 core_px    [0:NUM_CORES-1],
-    output logic [31:0]                 core_py    [0:NUM_CORES-1],
-    output logic [31:0]                 core_pang  [0:NUM_CORES-1],
+    output logic [NUM_CORES*7-1:0]      core_col_flat,
+    output logic [NUM_CORES*32-1:0]     core_px_flat,
+    output logic [NUM_CORES*32-1:0]     core_py_flat,
+    output logic [NUM_CORES*32-1:0]     core_pang_flat,
     input  logic [NUM_CORES-1:0]        core_done,
     // High when gpu_collector has no pending core result waiting to be
     // picked up. A column now drains as NUM_ROWS AXI writes (wall-height
@@ -47,10 +50,10 @@ module gpu_dispatcher #(
             core_start <= '0;
             done_accum <= '0;
             for (int i = 0; i < NUM_CORES; i++) begin
-                core_col[i]  <= '0;
-                core_px[i]   <= '0;
-                core_py[i]   <= '0;
-                core_pang[i] <= '0;
+                core_col_flat[i*7 +: 7]     <= '0;
+                core_px_flat[i*32 +: 32]    <= '0;
+                core_py_flat[i*32 +: 32]    <= '0;
+                core_pang_flat[i*32 +: 32]  <= '0;
             end
         end else begin
             core_start <= '0;
@@ -69,11 +72,11 @@ module gpu_dispatcher #(
                     // Fire all cores for this round
                     done_accum <= '0;
                     for (int i = 0; i < NUM_CORES; i++) begin
-                        core_col[i]   <= 7'(round * NUM_CORES + i);
-                        core_px[i]    <= player_x;
-                        core_py[i]    <= player_y;
-                        core_pang[i]  <= player_angle;
-                        core_start[i] <= 1'b1;
+                        core_col_flat[i*7 +: 7]    <= 7'(round * NUM_CORES + i);
+                        core_px_flat[i*32 +: 32]   <= player_x;
+                        core_py_flat[i*32 +: 32]   <= player_y;
+                        core_pang_flat[i*32 +: 32] <= player_angle;
+                        core_start[i]              <= 1'b1;
                     end
                     state <= WAIT;
                 end
