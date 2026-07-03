@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 // 80×45 character framebuffer: 4 KB of block RAM.
 // Write port: AXI4-Lite slave (GPU collector, byte-write, wstrb[0] only).
 // Read port A: AXI4-Lite read (CPU debug, sys_clk).

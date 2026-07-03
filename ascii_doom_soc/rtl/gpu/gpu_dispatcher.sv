@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 // Dispatches 80 columns across NUM_CORES DDA cores.
 // Static assignment: col N → core (N % NUM_CORES).
 // Fires all cores for each round simultaneously; waits for all cores done before next round.
@@ -21,12 +22,18 @@ module gpu_dispatcher #(
     output logic [31:0]                 core_px    [0:NUM_CORES-1],
     output logic [31:0]                 core_py    [0:NUM_CORES-1],
     output logic [31:0]                 core_pang  [0:NUM_CORES-1],
-    input  logic [NUM_CORES-1:0]        core_done
+    input  logic [NUM_CORES-1:0]        core_done,
+    // High when gpu_collector has no pending core result waiting to be
+    // picked up. A column now drains as NUM_ROWS AXI writes (wall-height
+    // rendering) instead of one, so without this a core could finish its
+    // next column before the collector even picked up its previous one,
+    // silently dropping data — gating the round on it prevents that.
+    input  logic                        collector_ready
 );
 
     localparam int ROUNDS = TOTAL_COLS / NUM_CORES; // 20 for 4 cores
 
-    typedef enum logic [1:0] {IDLE, DISPATCH, WAIT} state_t;
+    typedef enum logic [1:0] {IDLE, DISPATCH, WAIT, DRAIN_WAIT} state_t;
     state_t state;
 
     logic [4:0]           round;        // 0..19
@@ -76,6 +83,19 @@ module gpu_dispatcher #(
                     done_accum <= done_accum | core_done;
                     if ((done_accum | core_done) == {NUM_CORES{1'b1}}) begin
                         done_accum <= '0;
+                        state      <= DRAIN_WAIT;
+                    end
+                end
+
+                // Separate state, checked on a *later* cycle than the one that
+                // just captured this round's done pulses into the collector's
+                // queue. Checking collector_ready in the same cycle as WAIT's
+                // final done pulse reads a stale pre-capture snapshot — the
+                // collector captures that same pulse on that same edge, so
+                // "ready" from a moment ago says nothing about whether the
+                // queue it just received has drained (see docs/decisions).
+                DRAIN_WAIT: begin
+                    if (collector_ready) begin
                         if (round == 5'(ROUNDS - 1)) begin
                             frame_done <= 1'b1;
                             state      <= IDLE;

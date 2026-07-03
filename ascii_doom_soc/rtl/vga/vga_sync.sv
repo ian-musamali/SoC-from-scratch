@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 // VGA 640x480 @ 60 Hz timing generator, 25.175 MHz pixel clock input.
 // All timing parameters annotated per VESA standard.
 module vga_sync (

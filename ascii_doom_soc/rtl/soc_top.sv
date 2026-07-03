@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 // ASCII Doom SoC — top-level integration
 //
 // Architecture:
@@ -42,6 +43,10 @@ module soc_top #(
     // UART (debug)
     output logic        uart_tx,
     input  logic        uart_rx,
+
+    // Player input — already synchronized to sys_clk by fpga_top; bit order
+    // {btnc, btnr, btnl, btnd, btnu}, active-high
+    input  logic [4:0]  buttons,
 
     // CPU AXI master bypass — only active when SIMULATION=1
     // In synthesis (SIMULATION=0), these are ignored; picorv32_axi drives the bus.
@@ -466,8 +471,9 @@ module soc_top #(
         .TOTAL_COLS(80),
         .MAP_SIZE  (MAP_SIZE)
     ) u_gpu (
-        .clk   (sys_clk),
-        .rst_n (rst_n),
+        .clk     (sys_clk),
+        .rst_n   (rst_n),
+        .buttons (buttons),
         // MMIO slave (from fabric S3)
         .s_awaddr (gpu_s_awaddr),  .s_awvalid(gpu_s_awvalid), .s_awready(gpu_s_awready),
         .s_wdata  (gpu_s_wdata),   .s_wstrb  (gpu_s_wstrb),

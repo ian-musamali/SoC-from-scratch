@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 // DDA raycaster core matching the Python reference algorithm exactly.
 // Uses pre-computed LUTs for sin/cos and reciprocal values.
 // Q16.16 fixed-point throughout.
@@ -17,7 +18,8 @@
 /* verilator lint_off UNUSEDPARAM */
 module dda_core #(
     parameter int TOTAL_COLS = 80,
-    parameter int MAP_SIZE   = 64
+    parameter int MAP_SIZE   = 64,
+    parameter int NUM_ROWS   = 45   // character rows on screen (see vga_top.sv)
 ) (
     input  logic        clk,
     input  logic        rst_n,
@@ -31,7 +33,9 @@ module dda_core #(
     input  logic [7:0]  map_read_data,
     output logic        map_read_req,
 
-    output logic [7:0]  ascii_char,
+    output logic [7:0]  ascii_char,   // wall shade character for this column
+    output logic [5:0]  wall_top,     // first row (0-based) the wall occupies
+    output logic [5:0]  wall_height,  // rows the wall spans; 0 = no wall (escaped bounds)
     output logic        done
 );
 
@@ -119,7 +123,7 @@ module dda_core #(
     // -----------------------------------------------------------------------
     // State machine
     // -----------------------------------------------------------------------
-    typedef enum logic [2:0] {IDLE, INIT, PREP, MAP_WAIT, MARCH, DONE_ST} state_t;
+    typedef enum logic [2:0] {IDLE, INIT, PREP, MAP_WAIT, MARCH, HEIGHT_WAIT, DONE_ST} state_t;
     state_t state;
 
     // Latched inputs
@@ -186,6 +190,62 @@ module dda_core #(
     assign rdy_comb = $signed(rdy_mul_a[47:16]) + $signed(rdy_mul_b[47:16]);
 
     // -----------------------------------------------------------------------
+    // Perpendicular wall distance — combinational, valid whenever MARCH detects
+    // a hit this cycle (map_read_data != 0). Hoisted out of the always_ff block
+    // (it used to be a local variable computed only for ascii_char) so it can
+    // also feed u_height_div's denominator on the same cycle.
+    // -----------------------------------------------------------------------
+    logic [31:0] perp_raw;
+    assign perp_raw = side_hit ? (sdy > ddy ? sdy - ddy : 32'd1)
+                                : (sdx > ddx ? sdx - ddx : 32'd1);
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [63:0] fish_mul;
+    /* verilator lint_on UNUSEDSIGNAL */
+    assign fish_mul = {32'b0, perp_raw} * {32'b0, fisheye_table[col_r]};
+    logic [31:0] perp_corrected;
+    assign perp_corrected = fish_mul[47:16];
+
+    // -----------------------------------------------------------------------
+    // Wall height: classic h = SCREEN_ROWS / perp_dist projection.
+    // fpdiv computes (numerator << 16) / denominator; feeding a Q16.16
+    // constant as numerator and perp_corrected (already Q16.16) as
+    // denominator yields a Q16.16 row count directly (see docs/decisions).
+    // Multi-cycle (34-cycle) and only triggered once per column, so it does
+    // not sit in the combinational critical path.
+    // -----------------------------------------------------------------------
+    localparam logic [31:0] HEIGHT_CONST_Q = 32'(NUM_ROWS) << 16;
+
+    logic        height_valid_in;
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [31:0] height_result;
+    /* verilator lint_on UNUSEDSIGNAL */
+    logic        height_valid_out;
+    logic        height_div_by_zero;
+
+    assign height_valid_in = (state == MARCH) && !(mx[6] | my[6]) && (map_read_data != 8'h0);
+
+    fpdiv u_height_div (
+        .clk         (clk),
+        .rst_n       (rst_n),
+        .numerator   (HEIGHT_CONST_Q),
+        .denominator (perp_corrected),
+        .valid_in    (height_valid_in),
+        .result      (height_result),
+        .valid_out   (height_valid_out),
+        .div_by_zero (height_div_by_zero)
+    );
+
+    // Integer row count, clamped to [1, NUM_ROWS]
+    logic [15:0] height_rows;
+    assign height_rows = (height_div_by_zero || (height_result[31:16] > 16'(NUM_ROWS)))
+                          ? 16'(NUM_ROWS)
+                          : (height_result[31:16] == 16'd0) ? 16'd1 : height_result[31:16];
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [15:0] wall_top_calc;
+    /* verilator lint_on UNUSEDSIGNAL */
+    assign wall_top_calc = (16'(NUM_ROWS) - height_rows) >> 1;
+
+    // -----------------------------------------------------------------------
     // Map address
     // -----------------------------------------------------------------------
     assign map_read_addr = {6'b0, my[5:0]} * 12'd64 + {6'b0, mx[5:0]};
@@ -228,6 +288,8 @@ module dda_core #(
             side_hit    <= 1'b0;
             first_march <= 1'b0;
             ascii_char  <= 8'h2E;
+            wall_top    <= '0;
+            wall_height <= '0;
             done        <= 1'b0;
         end else begin
             done <= 1'b0;
@@ -295,25 +357,16 @@ module dda_core #(
                 // MARCH: DDA step
                 MARCH: begin
                     if (mx[6] | my[6]) begin
-                        // Escaped map bounds (7-bit overflow)
-                        ascii_char <= 8'h2E;
-                        state      <= DONE_ST;
+                        // Escaped map bounds (7-bit overflow) — no wall to draw
+                        ascii_char  <= 8'h2E;
+                        wall_top    <= '0;
+                        wall_height <= '0;
+                        state       <= DONE_ST;
                     end else if (map_read_data != 8'h0) begin
-                        // Wall hit — compute perp distance with fisheye correction
-                        begin
-                            logic [31:0] perp;
-                            /* verilator lint_off UNUSEDSIGNAL */
-                            logic [63:0] fish_mul;
-                            /* verilator lint_on UNUSEDSIGNAL */
-                            logic [31:0] perp_corrected;
-                            perp = side_hit ? (sdy > ddy ? sdy - ddy : 32'd1)
-                                            : (sdx > ddx ? sdx - ddx : 32'd1);
-                            // Fisheye correction: perp_corrected = perp * cos(fov[col])
-                            fish_mul      = {32'b0, perp} * {32'b0, fisheye_table[col_r]};
-                            perp_corrected = fish_mul[47:16];
-                            ascii_char    <= dist_to_ascii(perp_corrected);
-                        end
-                        state <= DONE_ST;
+                        // Wall hit. perp_corrected (module-level comb.) also feeds
+                        // u_height_div this same cycle via height_valid_in.
+                        ascii_char <= dist_to_ascii(perp_corrected);
+                        state      <= HEIGHT_WAIT;
                     end else begin
                         if (sdx <= sdy) begin
                             sdx      <= sdx + ddx;
@@ -325,6 +378,17 @@ module dda_core #(
                             side_hit <= 1'b1;
                         end
                         state <= MAP_WAIT;
+                    end
+                end
+
+                // --------------------------------------------------------
+                // HEIGHT_WAIT: u_height_div runs 34 cycles; not on the
+                // combinational critical path, just added pipeline latency.
+                HEIGHT_WAIT: begin
+                    if (height_valid_out) begin
+                        wall_height <= height_rows[5:0];
+                        wall_top    <= wall_top_calc[5:0];
+                        state       <= DONE_ST;
                     end
                 end
 

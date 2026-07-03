@@ -1,85 +1,77 @@
 # ASCII Doom SoC — Session Handoff
-_Date: 2026-06-13_
+_Date: 2026-07-03_
 
 ## What was done this session
 
-### Steps completed
-| Step | Work |
+| Area | Work |
 |------|------|
-| 12 (sim debug) | Fixed `dda_core.sv` stale-BRAM bug; simulation now 80/80 vs Python reference |
-| 12 (cleanup) | Removed all debug output from `sim/tb_soc/tb_soc_top.cpp`; PASS still holds |
-| 13 (constraints) | `constraints/nexys_a7.xdc` — all pins for XC7A100T-CSG324 |
-| 13 (FPGA wrapper) | `rtl/fpga_top.sv` — MMCM generates 65 MHz sys_clk + 25 MHz pix_clk |
-| 13 (synthesis) | Vivado 2025.2 synthesis: clean, no errors, no CRITICAL WARNINGs |
-| 13 (implementation) | **WNS = +0.420 ns @ 65 MHz**, 0 failing endpoints, timing closed |
-| 13 (board) | Bitstream programmed to Nexys A7 via JTAG |
-| firmware | Real PicoRV32 fetched, firmware built (601 bytes), pre-loaded into BRAM |
+| RTL polish | Verilator lint sweep (verible not installed): 85 → 16 warnings. Added missing `` `timescale `` to 16 files. Fixed `synth_nexys_a7.tcl` (was silently building with the CPU stub, never the real `picorv32.v`). Reviewed and accepted one SYNCASYNCNET warning as standard practice, not a bug. |
+| Player input | Wired 5 real Nexys A7 push-buttons through a synchronizer into a new `BUTTONS` register (GPU MMIO offset `0x1C`). Firmware now turns/moves under button control instead of auto-rotating. |
+| Wall collision | Firmware checks the destination tile (`tile_is_wall()`) before committing a move, X/Y independently so the player slides along walls. `gen_map_hex.py` now emits `map_data.h` alongside `map.hex` from the same `MAP_STR`, so firmware's collision map can't drift from what's baked into hardware. |
+| **Real 3D wall-height rendering** | The GPU previously only ever wrote row 0 of the 80×45 character grid — a one-row shaded strip, not an actual 3D view. Added a per-core `fpdiv` (classic `h = NUM_ROWS/perp_dist` projection); `gpu_collector.sv` now drains each column as ~45 writes (ceiling/wall/floor) instead of one. |
+| Backpressure fix | The wall-height change surfaced two real bugs where a fast round could outrun the now much-slower collector and silently drop a column's data (17/80, then 14/80 columns went blank, no error). Root cause: a one-cycle-stale readiness check in `gpu_dispatcher.sv`. Fixed by splitting the wait into two FSM states. Full writeup: `docs/decisions/soc_top.md`. |
 
-### RTL bugs fixed
-1. **`dda_core.sv`** — `map_read_req = (state == MARCH)` caused stale BRAM data between
-   rounds. Fix: `map_read_req = (state == MAP_WAIT) | (state == MARCH)`.
-2. **`soc_top.sv` main BRAM** — async reset in data block blocked Xilinx BRAM inference
-   (256 KB = fatal). Fix: split into control-with-reset + data-no-reset always_ff blocks.
-3. **`soc_top.sv` map_bram** — 2D array inferred as "3D-RAM" (131K FFs). Fix: per-core
-   1D arrays in generate block.
-4. **`char_framebuffer.sv`** — async reset in data block + multi-address byte-lane writes
-   blocked BRAM inference (32K FFs). Fix: separate blocks, single-byte write at `aw_addr_r`.
-5. **`char_framebuffer.sv` CDC** — Port B (VGA read) was on sys_clk; `vga_top` drives
-   `vga_addr` on pix_clk → 11 CDC timing violations. Fix: added `pix_clk` port, Port B now
-   a true dual-port BRAM with independent clock.
-6. **`gpu_mmio.sv`** — `reg_ctrl[1]` driven by two always_ff blocks (CRITICAL WARNING).
-   Fix: inject `frame_done` live into the AXI read mux; remove the hardware-update path.
-7. **`picorv32_axi.sv` stub** — missing `mem_axi_awprot`, `mem_axi_arprot` and parameters.
-   Fix: stub updated to match real `picorv32_axi` interface.
+Full technical detail, root-causing, and verification methodology for each item lives in
+`docs/decisions/soc_top.md` — read that before touching `dda_core.sv`, `gpu_collector.sv`, or
+`gpu_dispatcher.sv` again.
 
-### New files
+### RTL bugs fixed this session
+1. **`gpu_dispatcher.sv`/`gpu_collector.sv` backpressure race** — `collector_ready` was checked
+   in the same cycle the collector captured the current round's own results, reading a stale
+   pre-capture snapshot. Fixed with a new `DRAIN_WAIT` state so the check happens on a strictly
+   later cycle. See "Real 3D wall-height rendering" in `docs/decisions/soc_top.md`.
+2. **`synth/synth_nexys_a7.tcl`** — globbed `rtl/core/*.sv`, which built the CPU **simulation
+   stub** (`picorv32_axi.sv`) instead of the real `picorv32.v`. Brought in line with the
+   already-correct `impl_nexys_a7.tcl`.
+
+### Deleted this session
+`software/firmware/game_loop.c`, `map.h`, `link.ld`, `start.S` (+ build byproducts) — an
+orphaned earlier firmware draft never referenced by the `Makefile`, with a misleading map (an
+empty box) that doesn't match the real one actually loaded into hardware.
+
+### New files this session
 ```
-rtl/fpga_top.sv                        MMCM + soc_top wrapper for Nexys A7
-rtl/core/picorv32.v                    Real PicoRV32 (fetched from YosysHQ/picorv32)
-constraints/nexys_a7.xdc               Pin + clock constraints
-synth/synth_nexys_a7.tcl               Synthesis-only TCL
-synth/impl_nexys_a7.tcl                Synth + impl + bitstream TCL
-synth/program_nexys_a7.tcl             JTAG programming TCL
-synth/out/ascii_doom_soc.bit           Programmed bitstream (65 MHz)
-software/firmware/startup.S            PicoRV32 reset handler
-software/firmware/main.c               Game loop (rotate angle, trigger GPU, UART heartbeat)
-software/firmware/linker.ld            BRAM layout (text+data+bss, stack at top)
-software/firmware/Makefile             Build: make all → firmware.hex + map.hex
-software/firmware/elf2hex.py           ELF binary → 32-bit $readmemh hex
-software/firmware/gen_map_hex.py       MAP_STR → 8-bit $readmemh hex
-software/firmware/firmware.hex         Pre-built firmware (65536 words, ~601 bytes used)
-software/firmware/map.hex              Pre-built map BRAM init (4096 bytes)
-docs/decisions/soc_top.md             Architecture decisions + map_read_req fix writeup
+rtl/gpu/gpu_collector.sv (rewritten)   Drains NUM_ROWS writes/column instead of 1
+software/firmware/gen_trig_lut.py      Generates trig_lut.h (256-entry Q16.16 sine table)
+software/firmware/trig_lut.h           Generated — do not hand-edit
+software/firmware/map_data.h           Generated by gen_map_hex.py, firmware's collision copy
 ```
 
 ---
 
 ## Current hardware state
 
-**Board:** Nexys A7 programmed with `synth/out/ascii_doom_soc.bit`.
+**Board:** Nexys A7, last physically programmed with the bitstream from the **2026-06-13**
+session (buttons/collision/wall-height auto-rotate era — auto-rotating camera, no 3D, no
+input). **Everything from this session (buttons, collision, wall-height, backpressure fix) is
+verified in simulation and via a full Vivado place+route run, but has NOT been reflashed to
+the physical board.** Re-run the Quick rebuild reference below before trusting real hardware
+against anything described here.
 
-**What should be running:**
-- PicoRV32 @ 65 MHz boots from address 0, sets player at (2.5, 2.5), triggers GPU frames
-  in a loop, rotating the angle by ~1 degree per frame.
-- 4-core DDA GPU renders 80 columns/frame; char_framebuffer updated each frame.
-- VGA 640×480 @ 60 Hz scans character grid via font ROM.
-- UART prints `frame 0xNNN  cycles=0xNNN` every 64 frames.
+**What should be running once reflashed:**
+- PicoRV32 @ 65 MHz boots, player starts at (2.5, 2.5). BTNL/BTNR turn, BTNU/BTND move along
+  the facing direction with wall collision (slides along walls instead of stopping dead).
+- 4-core DDA GPU renders a real pseudo-3D view: each of 80 columns gets a wall-height band
+  (near = tall, far = short), not a single shaded row.
+- VGA 640×480 @ 60 Hz scans the character grid via font ROM.
+- UART prints `frame 0xNNN  cycles=0xNNN` every 64 frames (still unconfirmed on real hardware
+  — see Known issues).
 
-**UART:** `/dev/ttyUSB0`, 115200 8N1.  
-`screen` not installed; use `picocom /dev/ttyUSB0 -b 115200` or `minicom`.
+**UART:** `/dev/ttyUSB0`, 115200 8N1. `screen` not installed; use
+`picocom /dev/ttyUSB0 -b 115200` or `minicom`.
 
 ---
 
-## Resource utilization (post-route, 65 MHz)
+## Resource utilization (post-route, 65 MHz, as of this session)
 
 | Resource | Used | Available | % |
 |----------|------|-----------|---|
-| LUTs | ~5 500 | 63 400 | ~9% |
-| FFs | ~2 200 | 126 800 | ~2% |
-| BRAM tiles | ~66 | 135 | ~49% |
-| DSP48 | ~56 | 240 | ~23% |
+| LUTs | 6 770 | 63 400 | 10.7% |
+| FFs | 3 323 | 126 800 | 2.6% |
+| BRAM tiles | 69.5 | 135 | 51.5% |
+| DSP48 | 60 | 240 | 25% |
 | MMCM | 1 | 6 | 17% |
-| IO | 17 | 210 | 8% |
+| IO | 22 | 210 | 10.5% |
 
 > The 64 RAMB36 tiles are consumed by the 256 KB instruction/data BRAM.
 > Reduce `BRAM_WORDS` from 65536 to 16384 (64 KB) to free ~48 tiles if needed.
@@ -88,21 +80,28 @@ docs/decisions/soc_top.md             Architecture decisions + map_read_req fix 
 
 ## Known issues / pending work
 
-### Timing (100 MHz target not met)
-The DDA fixed-point arithmetic (fpdiv/fpmul) has a ~14.5 ns critical path.  
-At 65 MHz (15.4 ns period) timing closes; 100 MHz requires pipelining the multipliers.  
-The fix: add one registered pipeline stage inside `rtl/lib/fpmul.sv` and `rtl/lib/fpdiv.sv`
-and update DDA state-machine wait states accordingly.
+### Timing margin is now very thin — WNS = +0.020 ns (was +0.420 ns)
+Wall-height rendering added real timing pressure even though the new per-core `fpdiv` is
+multi-cycle and off the combinational critical path. Still closes at 65 MHz (0 failing
+endpoints), bitstream builds — but there is almost no margin left before the **next** change
+in this area. **Before adding more GPU-side logic**, run
+`report_timing -max_paths 10` on an impl run to find the actual critical path (likely
+candidates: `gpu_collector.sv`'s `row_char` mux, or fanout from the per-core
+`wall_top`/`wall_height` buses — not yet confirmed). 100 MHz was never in reach regardless —
+the DDA fixed-point arithmetic has a ~14.5 ns critical path requiring `fpmul`/`fpdiv`
+pipelining independent of anything from this session.
 
-### Synthesis warning (harmless)
-`synth_nexys_a7.tcl` still reads `picorv32_axi.sv` (stub) then overwrites with `picorv32.v`
-→ "overwriting previous definition" warning.  
-`impl_nexys_a7.tcl` is already fixed (reads `uart_lite.sv` only, skips the stub).  
-Fix `synth_nexys_a7.tcl` the same way when you re-run synthesis.
+### Unconfirmed on real hardware
+UART RX/TX, buttons, wall collision, and wall-height rendering have **only** been verified in
+simulation and via Vivado place+route — none of it has been physically flashed and tested
+since 2026-06-13. Re-flash (see Quick rebuild reference) and check each independently.
 
-### UART bitstream output unconfirmed
-UART RX/TX pins and `uart_lite.sv` logic haven't been end-to-end verified on hardware yet.
-Check with `picocom /dev/ttyUSB0 -b 115200` after reprogramming.
+### `software/ref/raycaster_ref.py` map drift
+Its internal map (procedurally generated rooms) doesn't match the real map used everywhere
+else (`gen_map_hex.py`'s `MAP_STR`, also embedded directly in `tb_soc_top.cpp`). Noticed while
+building wall-height verification, not fixed — the golden reference string in
+`tb_soc_top.cpp` is hardcoded and doesn't depend on this script being live, so it wasn't a
+blocker this session. Fix before trusting `raycaster_ref.py` as a live oracle again.
 
 ---
 
@@ -110,39 +109,21 @@ Check with `picocom /dev/ttyUSB0 -b 115200` after reprogramming.
 
 | Step | Description |
 |------|-------------|
-| 14 | RTL polish — run Verible lint on all modules, fix warnings |
-| 15 | OpenLane GDS — GPU block only (`gpu_top.sv` + sub-modules), 20 MHz target |
-| 16 | Portfolio package — update README, add demo GIF/screenshot, timing/area tables |
+| 15 | OpenLane GDS — GPU block only (`gpu_top.sv` + sub-modules), 20 MHz target. `gpu_top.sv` lints clean standalone. **Re-check after the timing regression above** — GDS timing closure at even 20 MHz should be fine, but the module now has 4 more `fpdiv` instances than when this step was last scoped. |
+| 16 | Portfolio package — update README, add demo GIF/screenshot, timing/area tables. |
+| (unscoped) | Enemies/shooting — needs an entity system, sprite billboarding with a per-column depth test against the wall distance each `dda_core` already computes, and a fire-button hit test (BTNC is wired but reserved/unused). Substantial scope increase beyond the original 16-step plan; not broken into steps yet. |
 
 ---
 
 ## Quick rebuild reference
 
 ```bash
-# Firmware (after editing main.c)
-cd software/firmware && make all
-
-# Full FPGA flow from project root
-vivado -mode batch -source synth/impl_nexys_a7.tcl \
-    -log synth/out/impl.log -journal synth/out/impl.jou
-
-# Program board (hw_server must be running)
-/tools/2025.2/Vivado/bin/hw_server &
-vivado -mode batch -source synth/program_nexys_a7.tcl -nolog -nojournal
-
-# Simulation regression
-cd sim/tb_soc/obj_dir && ./Vsoc_top
-# Expected: Frame completed in 828 cycles / PASS: soc_top 80/80
-```
-
-## Build from scratch (after RTL changes)
-```bash
 cd /home/ian/SoC-from-scratch/ascii_doom_soc
 
-# 1. Rebuild firmware if main.c changed
-make -C software/firmware all
+# Firmware (after editing main.c / trig_lut / map data)
+make -C software/firmware clean all
 
-# 2. Verilator sim (SIMULATION=1, uses stub CPU)
+# Simulation regression
 rm -rf sim/tb_soc/obj_dir && mkdir -p sim/tb_soc/obj_dir
 verilator --cc -Wall --Wno-fatal --public-flat-rw --top-module soc_top -GSIMULATION=1 \
     -Mdir sim/tb_soc/obj_dir \
@@ -153,17 +134,22 @@ verilator --cc -Wall --Wno-fatal --public-flat-rw --top-module soc_top -GSIMULAT
     rtl/gpu/gpu_mmio.sv rtl/gpu/gpu_top.sv \
     rtl/dma/axi_dma.sv rtl/core/uart_lite.sv rtl/core/picorv32_axi.sv \
     rtl/soc_top.sv
-cd sim/tb_soc/obj_dir
-make -f Vsoc_top.mk -s
+cd sim/tb_soc/obj_dir && make -f Vsoc_top.mk -s
 g++ -std=c++17 -O2 -I . -I /usr/share/verilator/include -I /usr/share/verilator/include/vltstd \
     -c -o tb_soc_top.o ../tb_soc_top.cpp
 g++ -std=c++17 -O2 -o Vsoc_top tb_soc_top.o verilated.o verilated_dpi.o verilated_threads.o \
     Vsoc_top__ALL.a -lpthread
-./Vsoc_top   # must print PASS: soc_top 80/80
+cd /home/ian/SoC-from-scratch/ascii_doom_soc && ./sim/tb_soc/obj_dir/Vsoc_top
+# Expected: Frame completed in ~16170 cycles
+#   PASS: 80/80 wall characters match Python reference
+#   PASS: 80/80 wall heights within expected range
 
-# 3. Vivado impl + program
-cd /home/ian/SoC-from-scratch/ascii_doom_soc
-vivado -mode batch -source synth/impl_nexys_a7.tcl -log synth/out/impl.log -journal synth/out/impl.jou
+# Full FPGA flow: synth + impl + bitstream
+vivado -mode batch -source synth/impl_nexys_a7.tcl \
+    -log synth/out/impl.log -journal synth/out/impl.jou
+# Expected: 0 errors, 0 critical warnings, WNS ~+0.02 ns (thin — see Known issues)
+
+# Program board (hw_server must be running)
 /tools/2025.2/Vivado/bin/hw_server &
 vivado -mode batch -source synth/program_nexys_a7.tcl -nolog -nojournal
 ```

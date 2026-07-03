@@ -1,8 +1,11 @@
+`timescale 1ns/1ps
 // GPU MMIO register block — AXI4-Lite slave.
 // Implements all GPU_MMIO registers per the address map in CLAUDE.md.
 module gpu_mmio (
     input  logic        clk,
     input  logic        rst_n,
+    // Player input — synchronized upstream, {btnc, btnr, btnl, btnd, btnu}
+    input  logic [4:0]  buttons,
     // AXI4-Lite slave
     /* verilator lint_off UNUSEDSIGNAL */
     input  logic [31:0] s_awaddr,
@@ -46,6 +49,7 @@ module gpu_mmio (
     logic [31:0] reg_pang;      // 0x10
     logic [31:0] reg_cycles;    // 0x14 read-only
     logic [31:0] reg_util;      // 0x18 read-only
+    logic [31:0] reg_btns;      // 0x1C read-only — {27'b0, buttons}
 
     assign player_x     = reg_px;
     assign player_y     = reg_py;
@@ -104,11 +108,13 @@ module gpu_mmio (
             reg_status <= '0;
             reg_cycles <= '0;
             reg_util   <= '0;
+            reg_btns   <= '0;
         end else begin
             // Update read-only mirrors from GPU inputs
             reg_status <= {28'b0, core_busy};
             reg_cycles <= gpu_cycles;
             reg_util   <= {28'b0, core_util};
+            reg_btns   <= {27'b0, buttons};
 
             if (s_arvalid && s_arready) begin
                 s_arready <= 1'b0;
@@ -123,6 +129,7 @@ module gpu_mmio (
                     5'h10: s_rdata <= reg_pang;
                     5'h14: s_rdata <= reg_cycles;
                     5'h18: s_rdata <= reg_util;
+                    5'h1C: s_rdata <= reg_btns;
                     default: s_rdata <= '0;
                 endcase
             end

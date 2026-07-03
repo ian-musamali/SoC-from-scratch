@@ -42,6 +42,16 @@ set_property -dict { PACKAGE_PIN C4   IOSTANDARD LVCMOS33 } [get_ports { uart_rx
 set_property -dict { PACKAGE_PIN D4   IOSTANDARD LVCMOS33 } [get_ports { uart_tx }]
 
 ## ============================================================
+## Push-buttons (player input) — active-high
+## Pin numbers from Digilent Nexys-A7-100T-Master.xdc
+## ============================================================
+set_property -dict { PACKAGE_PIN M18  IOSTANDARD LVCMOS33 } [get_ports { btnu }]
+set_property -dict { PACKAGE_PIN P18  IOSTANDARD LVCMOS33 } [get_ports { btnd }]
+set_property -dict { PACKAGE_PIN P17  IOSTANDARD LVCMOS33 } [get_ports { btnl }]
+set_property -dict { PACKAGE_PIN M17  IOSTANDARD LVCMOS33 } [get_ports { btnr }]
+set_property -dict { PACKAGE_PIN N17  IOSTANDARD LVCMOS33 } [get_ports { btnc }]
+
+## ============================================================
 ## Bitstream / configuration
 ## ============================================================
 set_property BITSTREAM.GENERAL.COMPRESS  TRUE  [current_design]

@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 // PicoRV32 AXI4-Lite master stub for simulation (SIMULATION=1).
 // Synthesis uses the real picorv32.v; this stub exists so Verilator can
 // elaborate soc_top without the full picorv32 source.

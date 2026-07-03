@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 // Q16.16 signed fixed-point divider
 // Computes result = (numerator << 16) / denominator using 32-cycle restoring division.
 // Latency: 34 clock cycles after valid_in.

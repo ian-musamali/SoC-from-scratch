@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 // AXI4-Lite 2-master × 4-slave crossbar.
 // Masters: M0=CPU, M1=DMA. Round-robin arbitration; M1 wins ties.
 // Address decode on bits[31:28]:

@@ -10,7 +10,7 @@ BRAM_WORDS = 65536
 
 all: firmware.hex map.hex
 
-firmware.elf: startup.S main.c linker.ld
+firmware.elf: startup.S main.c linker.ld trig_lut.h map_data.h
 	$(TOOLCHAIN)-gcc $(CFLAGS) $(LDFLAGS) -o $@ startup.S main.c
 
 firmware.bin: firmware.elf
@@ -19,8 +19,13 @@ firmware.bin: firmware.elf
 firmware.hex: firmware.bin elf2hex.py
 	python3 elf2hex.py $< $@ $(BRAM_WORDS)
 
-map.hex: gen_map_hex.py
+# map.hex (hardware map_bram init) and map_data.h (firmware collision copy)
+# come from the same MAP_STR in gen_map_hex.py — always regenerated together.
+map.hex map_data.h: gen_map_hex.py
 	python3 gen_map_hex.py
+
+trig_lut.h: gen_trig_lut.py
+	python3 gen_trig_lut.py
 
 disasm: firmware.elf
 	$(TOOLCHAIN)-objdump -d $<
@@ -29,4 +34,4 @@ size: firmware.elf
 	$(TOOLCHAIN)-size $<
 
 clean:
-	rm -f firmware.elf firmware.bin firmware.hex map.hex
+	rm -f firmware.elf firmware.bin firmware.hex map.hex map_data.h trig_lut.h

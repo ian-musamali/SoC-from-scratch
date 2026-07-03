@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 // Q16.16 signed fixed-point multiplier
 // Extracts bits [47:16] from the 64-bit product (upper 16 are overflow, lower 16 are sub-LSB fraction).
 module fpmul (

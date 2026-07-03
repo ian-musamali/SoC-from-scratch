@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 // AXI DMA controller — autonomous memory-to-memory transfer.
 // CPU writes DMA_SRC, DMA_DST, DMA_LEN, then DMA_CTRL.start=1.
 // DMA reads from src via AXI master read port, writes to dst via AXI master write port.

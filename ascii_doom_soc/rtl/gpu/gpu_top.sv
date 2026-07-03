@@ -1,12 +1,16 @@
+`timescale 1ns/1ps
 // GPU top: wires dispatcher, NUM_CORES dda_cores, collector, and MMIO register block.
 /* verilator lint_off UNUSEDPARAM */
 module gpu_top #(
     parameter int NUM_CORES  = 4,
     parameter int TOTAL_COLS = 80,
-    parameter int MAP_SIZE   = 64
+    parameter int MAP_SIZE   = 64,
+    parameter int NUM_ROWS   = 45
 ) (
     input  logic        clk,
     input  logic        rst_n,
+    // Player input — synchronized upstream, {btnc, btnr, btnl, btnd, btnu}
+    input  logic [4:0]  buttons,
     // AXI4-Lite slave — GPU MMIO (from CPU/fabric)
     input  logic [31:0] s_awaddr,
     input  logic        s_awvalid,
@@ -55,6 +59,9 @@ module gpu_top #(
     logic [31:0]          core_pang [0:NUM_CORES-1];
     logic [NUM_CORES-1:0] core_done;
     logic [7:0]           core_char [0:NUM_CORES-1];
+    logic [5:0]           core_wall_top    [0:NUM_CORES-1];
+    logic [5:0]           core_wall_height [0:NUM_CORES-1];
+    logic                 collector_ready;   // queue_empty from u_coll — gates u_disp rounds
     // Per-core map ports wire directly to top-level ports
 
 
@@ -73,6 +80,7 @@ module gpu_top #(
     // MMIO
     gpu_mmio u_mmio (
         .clk, .rst_n,
+        .buttons,
         .s_awaddr, .s_awvalid, .s_awready,
         .s_wdata,  .s_wvalid,  .s_wready, .s_wstrb,
         .s_bresp,  .s_bvalid,  .s_bready,
@@ -91,14 +99,15 @@ module gpu_top #(
         .frame_start, .frame_done,
         .player_x, .player_y, .player_angle,
         .core_start, .core_col, .core_px, .core_py, .core_pang,
-        .core_done
+        .core_done,
+        .collector_ready
     );
 
     // DDA cores — each gets its own map port (replicated read-only BRAM in hardware)
     genvar g;
     generate
         for (g = 0; g < NUM_CORES; g++) begin : gen_cores
-            dda_core #(.TOTAL_COLS(TOTAL_COLS), .MAP_SIZE(MAP_SIZE)) u_core (
+            dda_core #(.TOTAL_COLS(TOTAL_COLS), .MAP_SIZE(MAP_SIZE), .NUM_ROWS(NUM_ROWS)) u_core (
                 .clk, .rst_n,
                 .start        (core_start[g]),
                 .player_x     (core_px[g]),
@@ -109,15 +118,19 @@ module gpu_top #(
                 .map_read_data(map_read_data[g]),
                 .map_read_req (map_read_req[g]),
                 .ascii_char   (core_char[g]),
+                .wall_top     (core_wall_top[g]),
+                .wall_height  (core_wall_height[g]),
                 .done         (core_done[g])
             );
         end
     endgenerate
 
     // Collector
-    gpu_collector #(.NUM_CORES(NUM_CORES), .TOTAL_COLS(TOTAL_COLS)) u_coll (
+    gpu_collector #(.NUM_CORES(NUM_CORES), .TOTAL_COLS(TOTAL_COLS), .NUM_ROWS(NUM_ROWS)) u_coll (
         .clk, .rst_n,
         .core_done, .core_col, .core_char,
+        .core_wall_top, .core_wall_height,
+        .queue_empty (collector_ready),
         .m_awaddr, .m_awvalid, .m_awready,
         .m_wdata,  .m_wvalid,  .m_wready, .m_wstrb,
         .m_bresp,  .m_bvalid,  .m_bready

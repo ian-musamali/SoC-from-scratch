@@ -6,6 +6,9 @@ Bus:           AXI4-Lite — 2 masters (CPU, DMA), 4 slaves: BRAM, UART, VGA fra
 GPU:           Parallel DDA raycaster — 4 cores default, parameterized to 8
                Static dispatch: column N → core (N mod NUM_CORES)
                Dispatcher → [DDA core × NUM_CORES] → collector → framebuffer write
+               Real pseudo-3D: each core computes a wall-height band (fpdiv,
+               h = NUM_ROWS/perp_dist) per column, not just a shading character —
+               collector drains ~45 rows/column (blank ceiling/floor + wall glyph band)
 Display:       VGA 640×480 @ 60 Hz, 25.175 MHz pixel clock via MMCM
                ASCII renderer: 8×8 font ROM, 80×45 character grid
                80×45 grid uses 640×360 of 480 active lines; 120 lines blank at bottom
@@ -38,7 +41,12 @@ Style:         snake_case signals/modules, SCREAMING_SNAKE_CASE parameters
 | PLAYER_ANG | 0x10   | Q16.16 player angle (0=east, CCW positive)   |
 | GPU_CYCLES | 0x14   | cycle count for last frame                   |
 | CORE_UTIL  | 0x18   | per-core utilization [3:0]                   |
-| DMA_CTRL   | 0x1C   | bit0=start, bit1=done                        |
-| DMA_SRC    | 0x20   | source address                               |
-| DMA_DST    | 0x24   | destination address                          |
-| DMA_LEN    | 0x28   | transfer length in bytes                     |
+| BUTTONS    | 0x1C   | read-only, {27'b0, btnc,btnr,btnl,btnd,btnu}  |
+
+Note: DMA_CTRL/SRC/DST/LEN registers were planned here in an earlier draft but
+never implemented in `gpu_mmio.sv`, and `DMA_SRC/DST/LEN` at 0x20/0x24/0x28
+don't even fit inside the GPU MMIO slave's actual 32-byte AXI window
+(`0x30000000`–`0x3000001F`, see `axi4lite_fabric.sv`). `soc_top.sv` currently
+ties `dma_start/src/dst/len` to constants. Wiring DMA control through MMIO
+needs the fabric's GPU MMIO window widened first — out of scope for the
+button-input work that claimed the only free 0x1C slot in the meantime.

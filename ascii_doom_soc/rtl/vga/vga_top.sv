@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 // VGA top-level: composites char_framebuffer + font_rom into RGB pixel stream.
 // Pixel clock domain (25.175 MHz). CDC boundary with sys_clk is at char_framebuffer
 // read port — Xilinx true dual-port BRAM handles independent port clocks.

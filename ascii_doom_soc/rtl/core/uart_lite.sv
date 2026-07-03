@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 // Minimal UART stub — AXI4-Lite slave, accepts all writes, returns 0 on reads.
 // Replace with a full UART (e.g., Xilinx AXI UART Lite) for real FPGA use.
 module uart_lite (

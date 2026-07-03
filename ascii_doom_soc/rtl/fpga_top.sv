@@ -1,9 +1,17 @@
+`timescale 1ns/1ps
 // FPGA top-level wrapper for Nexys A7 (XC7A100T).
 // Generates sys_clk (100 MHz) and pix_clk (25 MHz) from the 100 MHz board oscillator
 // via a single MMCME2_BASE instance.  Ties off all simulation-only ports on soc_top.
 module fpga_top (
     input  logic        sys_clk_in,  // 100 MHz onboard oscillator (E3)
     input  logic        cpu_resetn,  // Active-low reset (CPU_RESET button, C12)
+
+    // Player input push-buttons, active-high, async to sys_clk
+    input  logic        btnu,        // M18 — forward
+    input  logic        btnd,        // P18 — backward
+    input  logic        btnl,        // P17 — turn left
+    input  logic        btnr,        // M17 — turn right
+    input  logic        btnc,        // N17 — reserved (future: fire)
 
     output logic        vga_hsync,
     output logic        vga_vsync,
@@ -56,6 +64,15 @@ module fpga_top (
     assign rst_n = cpu_resetn & pll_locked;
 
     // -------------------------------------------------------------------------
+    // Button synchronizer — 2-flop, buttons are async to sys_clk
+    // -------------------------------------------------------------------------
+    logic [4:0] btn_meta, btn_sync;
+    always_ff @(posedge sys_clk) begin
+        btn_meta <= {btnc, btnr, btnl, btnd, btnu};
+        btn_sync <= btn_meta;
+    end
+
+    // -------------------------------------------------------------------------
     // SoC instantiation — simulation ports tied off
     // -------------------------------------------------------------------------
     soc_top #(
@@ -73,6 +90,8 @@ module fpga_top (
 
         .uart_tx (uart_tx),
         .uart_rx (uart_rx),
+
+        .buttons (btn_sync),
 
         // Simulation bypass ports — constant-zero in synthesis
         .sim_cpu_awaddr  ('0), .sim_cpu_awvalid (1'b0),

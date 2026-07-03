@@ -209,37 +209,91 @@ int main(int argc, char** argv) {
     }
     printf("Frame completed in %d cycles\n", frame_cyc);
 
-    // Drain extra cycles for last collector AXI writes to complete
-    for (int i = 0; i < 200; i++) sys_tick();
+    // Drain extra cycles: the collector now drains NUM_ROWS (45) AXI writes
+    // per column instead of one, and frame_done only guarantees the last
+    // column was *accepted* (backpressure), not that its ~45-row write has
+    // finished draining yet. Give it generous margin.
+    for (int i = 0; i < 400; i++) sys_tick();
 
-    // Read char_framebuffer via Verilator internal signal access
+    // Read the full 80x45 char_framebuffer via Verilator internal signal access.
+    // Layout is row*80+col (see vga_top.sv), rows 0..44.
+    static const int NUM_ROWS = 45;
+    static const int NUM_COLS = 80;
+    uint8_t grid[NUM_ROWS][NUM_COLS];
+    for (int r = 0; r < NUM_ROWS; r++)
+        for (int c = 0; c < NUM_COLS; c++)
+            grid[r][c] = (uint8_t)(dut->rootp->soc_top__DOT__u_cfb__DOT__mem[r * NUM_COLS + c] & 0xFF);
+
+    // The wall-shading character choice (dist_to_ascii in dda_core.sv) is
+    // completely unchanged by the wall-height feature — still bit-exact
+    // matchable against the original golden reference. What's new is WHICH
+    // rows it's drawn into; extract it by finding the (uniform) non-space
+    // band in each column.
     const char* ref = "****++++++++++++++========----::::.................::::::---------============++";
-    char rtl[81];
-    for (int i = 0; i < 80; i++) {
-        // Access: soc_top -> u_cfb -> mem[i]
-        // Verilator public-flat-rw exposes as rootp->soc_top__DOT__u_cfb__DOT__mem
-        rtl[i] = (char)(dut->rootp->soc_top__DOT__u_cfb__DOT__mem[i] & 0xFF);
+    char rtl_char[NUM_COLS + 1];
+    int  wall_top[NUM_COLS], wall_height[NUM_COLS];
+    for (int c = 0; c < NUM_COLS; c++) {
+        int first = -1, count = 0;
+        char ch = ' ';
+        for (int r = 0; r < NUM_ROWS; r++) {
+            if (grid[r][c] != 0x20) {
+                if (first < 0) { first = r; ch = (char)grid[r][c]; }
+                count++;
+            }
+        }
+        rtl_char[c]    = ch;
+        wall_top[c]    = first < 0 ? 0 : first;
+        wall_height[c] = count;
     }
-    rtl[80] = '\0';
+    rtl_char[NUM_COLS] = '\0';
 
     printf("REF: %s\n", ref);
-    printf("RTL: %s\n", rtl);
+    printf("RTL: %s\n", rtl_char);
 
-    int match = (strcmp(rtl, ref) == 0);
-    if (!match) {
-        int cnt = 0;
-        for (int i = 0; i < 80; i++) {
-            if (rtl[i] != ref[i])
-                printf("MISMATCH col %2d: RTL='%c'(0x%02x) REF='%c'\n",
-                       i, rtl[i], (unsigned char)rtl[i], ref[i]);
-            else cnt++;
-        }
-        printf("FAIL: %d/80 match\n", cnt);
-    } else {
-        printf("PASS: soc_top 80/80 columns match Python reference\n");
+    int char_match_cnt = 0;
+    for (int c = 0; c < NUM_COLS; c++) {
+        if (rtl_char[c] != ref[c])
+            printf("CHAR MISMATCH col %2d: RTL='%c'(0x%02x) REF='%c'\n",
+                   c, rtl_char[c], (unsigned char)rtl_char[c], ref[c]);
+        else
+            char_match_cnt++;
     }
+    bool chars_ok = (char_match_cnt == NUM_COLS);
+    printf(chars_ok ? "PASS: %d/80 wall characters match Python reference\n"
+                     : "FAIL: %d/80 wall characters match Python reference\n",
+           char_match_cnt);
 
-    printf("\nsoc_top: %d PASS, %d FAIL\n", match, 1 - match);
+    // Wall-height sanity: h = NUM_ROWS / perp_dist (rows), clamped to
+    // [1, NUM_ROWS]. Bucket ranges below are floor(45/d) over each
+    // dist_to_ascii threshold band, widened by a few rows to absorb the
+    // Q16.16/LUT quantization noise inherent in perp_corrected (the same
+    // noise the existing fisheye_table ceil/floor tweaks work around for
+    // the character brackets) — this checks the divide+clamp is in the
+    // right ballpark per column, not a bit-exact height match.
+    struct Range { char ch; int lo, hi; };
+    static const Range kRanges[] = {
+        {'#', 40, 45}, {'%', 27, 45}, {'*', 15, 32},
+        {'+', 9, 20},  {'=', 5, 13},  {'-', 3, 9},
+        {':', 1, 7},   {'.', 1, 5},
+    };
+    int height_ok_cnt = 0;
+    for (int c = 0; c < NUM_COLS; c++) {
+        int lo = 1, hi = 45;
+        for (const auto& rg : kRanges) {
+            if (ref[c] == rg.ch) { lo = rg.lo; hi = rg.hi; break; }
+        }
+        bool ok = (wall_height[c] >= lo && wall_height[c] <= hi);
+        if (ok) height_ok_cnt++;
+        else printf("HEIGHT OUT OF RANGE col %2d: char='%c' height=%d top=%d expected [%d,%d]\n",
+                     c, rtl_char[c], wall_height[c], wall_top[c], lo, hi);
+    }
+    bool heights_ok = (height_ok_cnt == NUM_COLS);
+    printf(heights_ok ? "PASS: %d/80 wall heights within expected range\n"
+                       : "FAIL: %d/80 wall heights within expected range\n",
+           height_ok_cnt);
+
+    bool match = chars_ok && heights_ok;
+    printf("\nsoc_top: %d PASS, %d FAIL\n", match ? 1 : 0, match ? 0 : 1);
     delete dut;
     return match ? 0 : 1;
 }

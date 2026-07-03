@@ -16,7 +16,9 @@ read_verilog -sv [glob rtl/bus/*.sv]
 read_verilog -sv [glob rtl/vga/*.sv]
 read_verilog -sv [glob rtl/gpu/*.sv]
 read_verilog -sv [glob rtl/dma/*.sv]
-read_verilog -sv [glob rtl/core/*.sv]
+# picorv32_axi.sv is a simulation stub — skip it; the real CPU comes from picorv32.v
+read_verilog -sv rtl/core/uart_lite.sv
+read_verilog    rtl/core/picorv32.v
 read_verilog -sv rtl/soc_top.sv
 read_verilog -sv rtl/fpga_top.sv
 
