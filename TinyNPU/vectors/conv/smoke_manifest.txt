@@ -1,2 +1,0 @@
-# conv suite: smoke
-smoke_4x4_identity

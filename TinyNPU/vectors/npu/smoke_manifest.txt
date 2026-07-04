@@ -1,2 +1,0 @@
-# npu suite: smoke
-smoke_1layer
