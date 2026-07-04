@@ -1,0 +1,5 @@
+# npu suite: random
+rand_prog_0
+rand_prog_1
+rand_prog_2
+rand_prog_3

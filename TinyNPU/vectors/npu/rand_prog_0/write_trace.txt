@@ -1,0 +1,6 @@
+# expected fm writes: addr data
+2000 80
+2001 7f
+2002 80
+2003 80
+0000 7f

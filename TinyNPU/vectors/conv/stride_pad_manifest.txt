@@ -1,0 +1,6 @@
+# conv suite: stride_pad
+sp_5x5_s1_p0
+sp_5x5_s2_p1
+sp_4x4_s2_p0
+sp_1x1_s1_p1
+sp_32x6_s2_p1

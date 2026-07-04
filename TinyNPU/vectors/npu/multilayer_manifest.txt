@@ -1,0 +1,3 @@
+# npu suite: multilayer
+ml_3layer_pingpong
+ml_cifar_shape_32x32

@@ -1,0 +1,6 @@
+# expected ofm writes: addr data
+3000 80
+3001 80
+3002 7f
+3003 7f
+3004 e2

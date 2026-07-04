@@ -1,0 +1,9 @@
+# conv suite: random
+rand_0
+rand_1
+rand_2
+rand_3
+rand_4
+rand_5
+rand_6
+rand_7

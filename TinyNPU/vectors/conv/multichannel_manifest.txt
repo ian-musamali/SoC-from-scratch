@@ -1,0 +1,4 @@
+# conv suite: multichannel
+mc_6x6_ch3
+mc_4x4_ch8_multipass
+mc_3x3_ch8_saturate
