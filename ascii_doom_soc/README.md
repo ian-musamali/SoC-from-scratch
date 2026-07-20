@@ -23,6 +23,59 @@ See [docs/arch/soc_hierarchy.md](docs/arch/soc_hierarchy.md) for the full module
 - Q16.16 fixed-point arithmetic throughout
 - GPU block hardened to GDSII on sky130A (OpenLane2), independent of the FPGA flow
 
+## Setting It Up and Playing It (no hardware background needed)
+
+This project is a small homemade computer — a CPU, a graphics chip, and a display controller — that gets loaded onto an FPGA board (a chip you can rewire with software). Once it's programmed, the board runs a Doom-style first-person maze, drawn entirely out of text characters, on a regular VGA monitor. You walk around it with the buttons on the board. No PC involved after programming — the board *is* the computer.
+
+### What you need
+
+- **A Digilent Nexys A7-100T board** (~$300; this exact model — the design is wired to its chip and buttons)
+- **A micro-USB cable** (connects the board to your computer for programming, and powers it)
+- **A monitor with a VGA input**, and a VGA cable (older monitors have this D-shaped 15-pin port; newer ones may need it via an adapter that accepts VGA *input* — a plain HDMI-to-VGA dongle pointing the wrong way won't work)
+- **A Linux computer** to build and program from, with three free tools installed (one-time setup):
+  1. **AMD Vivado** (free ML Standard edition — [download](https://www.xilinx.com/support/download.html); fair warning: it's a very large install, tens of GB) — turns the chip design into a file the board understands
+  2. **RISC-V compiler** — builds the game program that runs on the CPU. On Ubuntu/Debian: `sudo apt install gcc-riscv64-unknown-elf`
+  3. **Python 3 with Pillow** (`pip install pillow`) — generates the font, the maze map, and the math tables
+
+### Build everything (copy-paste, ~15–30 minutes, mostly waiting on Vivado)
+
+```bash
+cd ascii_doom_soc
+
+# 1. Build the game program + maze map
+make -C software/firmware clean all
+
+# 2. Generate the math tables and the font
+bash rtl/gpu/gen_dda_luts.sh
+python3 fonts/gen_font8x8.py
+
+# 3. Build the chip design (this is the slow step)
+vivado -mode batch -source synth/impl_nexys_a7.tcl \
+    -log synth/out/impl.log -journal synth/out/impl.jou
+```
+
+### Program the board and play
+
+1. Plug the board into your computer with the micro-USB cable (the port labeled **PROG**), connect the VGA cable to the monitor, and flip the board's power switch on.
+2. Program it:
+   ```bash
+   vivado -mode batch -source synth/program_nexys_a7.tcl -nolog -nojournal
+   ```
+   (If this can't find the board, start Vivado's board-connection service first: `hw_server &`, then retry.)
+3. The maze appears on the monitor. Walk around with the cross of five push-buttons on the board:
+
+| Button | Action |
+|--------|--------|
+| BTNU (up) | Walk forward |
+| BTND (down) | Walk backward |
+| BTNL (left) | Turn left |
+| BTNR (right) | Turn right |
+| BTNC (center) | Reserved (does nothing yet) |
+
+Walls near you look tall, far walls look short, and you slide along walls instead of stopping dead when you bump into them. There are no enemies or shooting (yet) — it's a walkable 3D maze.
+
+The programming isn't permanent: the board forgets the design when powered off, so re-run step 2 after each power cycle. **No board?** You can still watch it work: the Simulate section below runs the whole computer in software and checks a rendered frame against a reference — the screenshot at the top of this page came from exactly that.
+
 ## Quick Start
 
 ### Simulate (Verilator + C++ testbench)
